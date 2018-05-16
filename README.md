@@ -18,6 +18,18 @@ DOI: 10.1039/C5TA08574H
     
 DOI: 10.1002/aenm.201501590 
 
+    Ping Ong, Shyue, et al. "Li− Fe− P− O2 phase diagram from first principles calculations." Chemistry of Materials 20.5 (2008): 1798-1807.
+
+DOI: 10.1021/cm702327g
+
+    Mo, Yifei, Shyue Ping Ong, and Gerbrand Ceder. "First principles study of the Li10GeP2S12 lithium super ionic conductor material." Chemistry of Materials 24.1 (2011): 15-17.
+
+DOI: 10.1021/cm203303y
+
+    Jain, Anubhav, et al. "Commentary: The Materials Project: A materials genome approach to accelerating materials innovation." Apl Materials 1.1 (2013): 011002.
+
+DOI:10.1063/1.4812323
+
 ## Install
 
 This package works with both Python 2.7+ and Python 3.x. However, it is suggested to use Python 3.x, as the dependent package Pymatgen will be py3k only in the future.
