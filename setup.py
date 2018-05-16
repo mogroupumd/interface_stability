@@ -22,15 +22,17 @@ setup(
         'Programming Language :: Python :: 3.6'
     ],
     keywords=[],
+    #packages=['interface_stability','scripts'], 
     packages=find_packages(),
-    install_requires=['pymatgen>=2018.5.3','argparse'],
+    #install_requires=['pymatgen','argparse'],
+    install_requires=['argparse'],
     extras_require={},
     package_data={},
     data_files=[],
     entry_points={
         'console_scripts': [
             'phase_stability=interface_stability.scripts.phase_stability:main',
-            'pseudo_binary=interface_stability.scripts.pseudo_binary:main',
+            'pseudo_binary=interface_stability.scripts.pseudo_binary:main'
         ],
     },
     project_urls={
