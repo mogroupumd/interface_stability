@@ -25,26 +25,25 @@ This package works with both Python 2.7+ and Python 3.x. However, it is suggeste
 
 1. Install all dependency packages 
 
-    Use your favorite way to install pymatgen and argparse first.
+    Use your favorite way to install [pymatgen](http://pymatgen.org/) first.
     
 2. install this interface_stability package.
 
     clone this package from github
     
     ```bash
-    git clone https://github.com/mogroupumd/interface_stability.git
+    $ git clone https://github.com/mogroupumd/interface_stability.git
     ```
     
     install the package
-    
     ```bash
-    python setup.py install --user
+    $ python setup.py install --user
     ``` 
     
 3. Try to import python classes in your python console
 
     ```bash
-    python
+    $ python
     >>> from interface_stability import singlephase
     ```
 
@@ -52,8 +51,8 @@ This package works with both Python 2.7+ and Python 3.x. However, it is suggeste
  into your PATH. Try to call it from terminal and read the documentations:
 
     ```bash
-    phase_stability -h
-    pseudo_binary -h
+    $ phase_stability -h
+    $ pseudo_binary -h
     ```
     
 5. Setup Materials Project API key. This enables you to fetch data from the Materials Project database.
@@ -71,11 +70,112 @@ This package works with both Python 2.7+ and Python 3.x. However, it is suggeste
    
 ## Usage
 
-There are two executable python scripts:
+There are two executable python scripts, both work with a few sub-commands options. 
+You can always use -h to see the help information. 
+For example,
 
-1. scripts/phase_stability.py
+```bash
+$ phase_stability -h
+$ phase_stability evolution -h
+```
 
-2. scripts/pseudo_binary.py
+###1. scripts/phase_stability.py
+
+**phase_stability stability composition**
+
+This gives the phase equilibria of a given composition.
+
+```bash
+$ phase_stability stability Li10GeP2S12
+------------------------------------------------------------
+Reduced formula of the given composition: Li10Ge(PS6)2
+Calculated phase equilibria: Li4GeS4    Li3PS4
+Li10Ge(PS6)2 -> 2 Li3PS4 + Li4GeS4
+------------------------------------------------------------
+```
+
+**phase_stability mu composition open_element chemical_potential**
+
+This gives the phase equilibria of a given composition under given chemical potential.
+
+Note: Chemical potential is always referenced to elementary phases and in eV units.
+
+```bash
+$ phase_stability mu Li3PS4 Li -5
+------------------------------------------------------------
+Reduced formula of the given composition: Li3PS4
+Open element : Li
+Chemical potential: -5 eV referenced to pure phase
+------------------------------------------------------------
+Reaction:Li3PS4 -> 3 Li + 0.5 S + 0.5 P2S7
+Reaction energy: -13.465 eV per Li3PS4
+------------------------------------------------------------
+```
+**phase_stability evolution [-posmu] composition open_element**
+
+This gives the evolution profile with changing chemical potential of an open element.
+
+A figure of reaction energy will also be generated
+
+```bash
+$ phase_stability evolution Li3PS4 Li
+------------------------------------------------------------
+Reduced formula of the given composition: Li3PS4
+
+ === Evolution Profile ===
+mu_high (eV) mu_low (eV)  d(n_Li) Phase equilibria                   Reaction                 
+    0.00        -0.87      8.00       Li2S, Li3P                Li3PS4 + 8 Li -> Li3P + 4 Li2S
+   -0.87        -0.93      6.00        Li2S, LiP                 Li3PS4 + 6 Li -> LiP + 4 Li2S
+   -0.93        -1.17      5.43      Li2S, Li3P7    Li3PS4 + 5.429 Li -> 0.1429 Li3P7 + 4 Li2S
+   -1.17        -1.30      5.14       Li2S, LiP7     Li3PS4 + 5.143 Li -> 0.1429 LiP7 + 4 Li2S
+   -1.30        -1.72      5.00          Li2S, P                   Li3PS4 + 5 Li -> 4 Li2S + P
+   -1.72        -2.36      0.00           Li3PS4                              Li3PS4 -> Li3PS4
+   -2.36        -3.74     -2.88       LiS4, P2S7    Li3PS4 -> 2.875 Li + 0.125 LiS4 + 0.5 P2S7
+   -3.74         -inf     -3.00          P2S7, S             Li3PS4 -> 3 Li + 0.5 S + 0.5 P2S7
+
+ === Reaction energy ===
+miu_Li (eV)  Rxn energy (eV/atom)
+   0.00             -1.42        
+  -0.87             -0.55        
+  -0.93             -0.50        
+  -1.17             -0.35        
+  -1.30             -0.26        
+  -1.72              0.00        
+  -2.36             -0.00        
+  -3.74             -0.50        
+  -3.94             -0.57
+Note:
+Chemical potential referenced to element phase.
+Reaction energy is normalized to per atom of the given composition.
+------------------------------------------------------------
+```
+**phase_stability plotvc [-posmu] [-v VALENCE] composition open_element**
+
+Generate a figure of voltage profile (and display all raw data). 
+
+```bash
+$ phase_stability plotvc Li3PS4 Li
+d n(Li)  Voltage ref. to Li (V)
+-3.00             3.74         
+-2.88             3.74         
+-2.88             2.36         
+ 0.00             2.36         
+ 0.00             1.72         
+ 5.00             1.72         
+ 5.00             1.30         
+ 5.14             1.30         
+ 5.14             1.17         
+ 5.43             1.17         
+ 5.43             0.93         
+ 6.00             0.93         
+ 6.00             0.87         
+ 8.00             0.87
+```
+
+
+
+
+###2. scripts/pseudo_binary.py
 
 ## License
 
