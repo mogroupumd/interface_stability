@@ -1,108 +1,81 @@
 ## interface_stability 
 
-This is designed to help researchers to perform diffusion analysis from *ab inito* molecular dynamic 
-(AIMD) simulations. It contains some useful python classes which can be integrated into your python
-analysis code, and one easy-to-use executable python script which can perform diffusion analysis on
-the terminal without further modification.
-
-
-The executable python script (script/analyze_aimd.py) has two main functions:
-
-1. Analyze diffusion properties from AIMD calculations at one single temperature. 
-
-2. Analyze diffusion properties from AIMD calculations at multiple temperatures. 
-
-    More information can be found by the behind code after you install the library
-
-    ```bash
-    analyze_aimd -h
-    analyze_aimd diffusivity -h
-    analyze_aimd arrhenius -h
-    ```
+This package and associated scripts are designed to analyze the interface stability. 
 
 ## Citing
 
-If you use this library, please cite the following papers:
+If you use this library, please consider citing the following papers:
 
-    He, Xingfeng, Yizhou Zhu, Alexander Epstein, and Yifei Mo. "Statistical variances 
-    of diffusional properties from ab initio molecular dynamics simulations." 
-    npj Computational Materials 4, no. 1 (2018): 18.
+    Zhu, Yizhou, Xingfeng He, and Yifei Mo. "Origin of outstanding stability in the lithium solid electrolyte materials: insights from thermodynamic analyses based on first-principles calculations." ACS applied materials & interfaces 7.42 (2015): 23685-23693.
     
-http://dx.doi.org/10.1038/s41524-018-0074-y
+DOI: 10.1021/acsami.5b07517
 
-    He, Xingfeng, Yizhou Zhu, and Yifei Mo. "Origin of fast ion diffusion in super-ionic 
-    conductors." Nature communications 8 (2017): 15893.
+    Zhu, Yizhou, Xingfeng He, and Yifei Mo. "First principles study on electrochemical and chemical stability of solid electrolyte–electrode interfaces in all-solid-state Li-ion batteries." Journal of Materials Chemistry A 4.9 (2016): 3253-3266.
+
+DOI: 10.1039/C5TA08574H
+
+    Han, Fudong, et al. "Electrochemical stability of Li10GeP2S12 and Li7La3Zr2O12 solid electrolytes." Advanced Energy Materials 6.8 (2016).
     
-http://dx.doi.org/10.1038/ncomms15893
+DOI: 10.1002/aenm.201501590 
 
-    Mo, Yifei, Shyue Ping Ong, and Gerbrand Ceder. "First principles study of the Li10GeP2S12 
-    lithium super ionic conductor material." Chemistry of Materials 24, no. 1 (2011): 15-17.
+## Install
+
+This package works with both Python 2.7+ and Python 3.x. However, it is suggested to use Python 3.x, as the dependent package Pymatgen will be py3k only in the future.
+
+
+1. Install all dependency packages 
+
+    Use your favorite way to install pymatgen and argparse first.
     
-http://dx.doi.org/10.1021/cm203303y
+2. install this interface_stability package.
 
-
-    Ong, Shyue Ping, William Davidson Richards, Anubhav Jain, Geoffroy Hautier, Michael Kocher, 
-    Shreyas Cholia, Dan Gunter, Vincent L. Chevrier, Kristin A. Persson, and Gerbrand Ceder. 
-    "Python Materials Genomics (pymatgen): A robust, open-source python library for materials 
-    analysis." Computational Materials Science 68 (2013): 314-319. 
-
-https://doi.org/10.1016/j.commatsci.2012.10.028
-
-## Install and test steps
-
-1. Install all dependency and this library
+    clone this package from github
     
     ```bash
-    python setup.py install
-    ``` 
+    git clone https://github.com/mogroupumd/interface_stability.git
+    ```
     
-    if you have no root access, you may need to use
+    install the package
     
     ```bash
     python setup.py install --user
-    ```
+    ``` 
     
-2. Try to import python classes in your python console
-
-    ```python
-    from aimd.diffusion import DiffusivityAnalyzer, ErrorAnalysisFromDiffusivityAnalyzer, \
-    ArreheniusAnalyzer
-    ```
-
-3. The setup.py will automatically create an executable file analyze_aimd into your PATH. Try to
-call it from terminal and read the documentations:
+3. Try to import python classes in your python console
 
     ```bash
-    analyze_aimd -h
-    analyze_aimd diffusivity -h
-    analyze_aimd arrhenius -h
+    python
+    >>> from interface_stability import singlephase
+    ```
+
+4. The setup.py will automatically create an executable file phase_stability and pseudo_binary
+ into your PATH. Try to call it from terminal and read the documentations:
+
+    ```bash
+    phase_stability -h
+    pseudo_binary -h
     ```
     
-4. Use the provided test files to perform diffusion analysis.
-    
-    a. go to the folder aimd/tests/tests_files/latp_md
-    
-    b. run in terminal
-     ```bash
-     analyze_aimd diffusivity Li+ RUN_ 10 29 3.2
-     ``` 
-    
-    c. You can ignore the warning msgs. You will get the diffusion results. 
-    The diffusivity is ~7.6e-5 cm^2/s, conductivity is ~583 mS/cm
-    
-    d. go to folder aimd/tests/tests_files/arrhenius 
-    
-    e. run in terminal
-     ```bash
-     analyze_aimd arrhenius D_T.csv -p POSCAR -T 300 -s Li+
-     analyze_aimd arrhenius D_T.csv -p POSCAR -T 300 -s Li+ --plot
-     ``` 
-    
-    f. You will get the arrhenius relationship of LATP. The conductivity at 300K is predicted to be 
-    ~1.08 mS/cm, Ea is ~0.258 eV +- 0.017 eV. If your x11 windows settings are correct or you are at
-    local computer, you will have a plot window pop up to show the arrhenius relationship for cmd with
-    -plot option.
+5. Setup Materials Project API key. This enables you to fetch data from the Materials Project database.
+   
+   The documentation is at 
+   https://materialsproject.org/open
+   
+   Your API key is at (login required)
+   https://materialsproject.org/dashboard
+   
+   You need to put the API key in ~/.pmgrc.yaml file. (Create this file if not exist)
+   ```bash
+   PMG_MAPI_KEY: [Your API key goes here]
+   ```
+   
+## Usage
 
+There are two executable python scripts:
+
+1. scripts/phase_stability.py
+
+2. scripts/pseudo_binary.py
 
 ## License
 
