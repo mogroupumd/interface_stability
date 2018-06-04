@@ -228,6 +228,31 @@ class VirtualEntry(ComputedEntry):
         evolution_profile[0]['chempot'] -= offset
         return evolution_profile
 
+
+    def get_stability_window(self,oe,allowpmu=False, entries=None):
+        profile = self.get_phase_evolution_profile(oe=oe,allowpmu=allowpmu,entries=entries)
+        chempots = [_['chempot'] for _ in profile]
+        evolutions = [_['evolution'] for _ in profile]
+        index = evolutions.index(sorted(evolutions,key=lambda x: abs(x))[0])
+
+        if abs(evolutions[index]) < 1e-8:
+            ref = profile[0]['element_reference'].energy_per_atom
+            if index < len(profile)-1:
+                return (chempots[index]-ref,chempots[index+1]-ref)
+            else:
+                return (chempots[index]-ref,None)
+        else:
+            return (None, None)
+
+
+
+        #index = chempots.index([evolution])
+        # print (evolutions[index],chempots[index])
+
+        #return
+
+
+
     def get_evolution_phases_table_string(self, open_el, pure_el_ref, PE_list, oe_amt_list, mu_trans_list, allowpmu):
         if not allowpmu:
             mu_h_list = [0] + mu_trans_list
