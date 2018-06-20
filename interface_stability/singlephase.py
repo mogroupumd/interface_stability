@@ -215,8 +215,8 @@ class VirtualEntry(ComputedEntry):
         string = '\n'.join(output)
         return string
 
-    def get_phase_evolution_profile(self, oe, allowpmu=False, entries=None):
-        pd_entries = entries if entries else self.get_PD_entries(sup_el=[oe])
+    def get_phase_evolution_profile(self, oe, allowpmu=False, entries=None,exclusions=None):
+        pd_entries = entries if entries else self.get_PD_entries(sup_el=[oe],exclusions=exclusions)
         offset = 30 if allowpmu else 0
         for e in pd_entries:
             if e.composition.is_element and oe in e.composition.keys():
