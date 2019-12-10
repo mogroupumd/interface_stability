@@ -34,32 +34,28 @@ rc('font', **{'family': 'sans-serif', 'sans-serif': ['Helvetica'], 'size': 15})
 
 
 class VirtualEntry(ComputedEntry):
-    def __init__(self, composition, energy, attribute=None, name=None):
-        super(VirtualEntry, self).__init__(Composition(composition), energy, attribute=attribute)
+    def __init__(self, composition, energy, name=None):
+        super(VirtualEntry, self).__init__(Composition(composition), energy)
         if name:
             self.name = name
 
     @classmethod
     def from_composition(cls, comp, energy=0, name=None):
-        attribute = 'An initialized virtual entry'
-        return cls(Composition(comp), energy, attribute, name=name)
+        return cls(Composition(comp), energy, name=name)
 
     @classmethod
     def from_mixing(cls, mixing_dict):
-        attribute = 'An virtual entry based on linear combination of parent entries\nParents:\n'
         comp = Composition("")
         energy = 0
         for i in mixing_dict.keys():
             comp += Composition({el: i.composition[el] * mixing_dict[i] for el in i.composition.keys()})
             energy += mixing_dict[i] * i.energy
-            attribute += str(i.composition) + "\tEnergy:{}\tAmount:{}\n".format(i.energy, mixing_dict[i])
-        return cls(Composition(comp), energy, attribute)
+        return cls(Composition(comp), energy)
 
     @classmethod
     def from_mp(cls, criteria):
-        attribute = "Entry from MP database"
         entry = cls.get_mp_entry(criteria)
-        return cls(entry.composition, energy=entry.energy, name=entry.name, attribute=attribute)
+        return cls(entry.composition, energy=entry.energy, name=entry.name)
 
     @staticmethod
     def get_mp_entry(criteria):
@@ -142,7 +138,6 @@ class VirtualEntry(ComputedEntry):
         """
         Stabilize an entry by putting it on the convex hull
         """
-        self.attribute = "A virtual entry stabilized with \"on the hull\" energy"
         decomp_entries, hull_energy = self.get_decomp_entries_and_e_above_hull(entries=entries)
         self.correction -= (hull_energy * self.composition.num_atoms + 1e-8)
         return None
