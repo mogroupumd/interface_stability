@@ -1,6 +1,7 @@
 import argparse
-from pymatgen import Composition
-from interface_stability.singlephase import VirtualEntry
+from pymatgen.core import Composition
+from interface_stability import mpdata
+from interface_stability.singlephase import VirtualEntry, COMMON_WORKING_IONS
 
 
 def get_phase_equilibria_from_composition(args):
@@ -21,8 +22,9 @@ def get_phase_equilibria_and_decomposition_energy_under_mu_from_composition(args
     comp = Composition(args.composition)
     chempot = {args.open_element: args.chemical_potential}
     entry = VirtualEntry.from_composition(comp)
-    entry.stabilize()
-    print(entry.get_printable_PE_and_decomposition_in_gppd(chempot, entries=None))
+    entries = entry.get_gppd_entries(chempot)
+    entry.stabilize(entries=entries)
+    print(entry.get_printable_PE_and_decomposition_in_gppd(chempot, entries=entries))
     return 0
 
 
@@ -34,8 +36,10 @@ def get_phase_evolution_profile(args):
     comp = Composition(args.composition)
     entry = VirtualEntry.from_composition(comp)
     oe = args.open_element
-    entry.stabilize()
-    print(entry.get_printable_evolution_profile(oe, allowpmu=args.posmu))
+    entries = entry.get_PD_entries(sup_el=[oe])
+    entry.stabilize(entries=entries)
+    print(entry.get_printable_evolution_profile(oe, entries=entries, allowpmu=args.posmu,
+                                                plot_rxn_e=not args.noplot, save_path=args.save))
     return 0
 
 
@@ -46,13 +50,19 @@ def plot_vc(args):
     comp = Composition(args.composition)
     entry = VirtualEntry.from_composition(comp)
     oe = args.open_element
-    entry.stabilize()
-    common_working_ions = dict(Li=1, Na=1, K=1, Mg=2, Ca=2, Al=3)
-    valence = args.valence if args.valence else common_working_ions[oe]
-    oe_list, v_list = entry.get_vc_plot_data(oe, valence=valence, allowpmu=args.posmu)
+    entries = entry.get_PD_entries(sup_el=[oe])
+    entry.stabilize(entries=entries)
+    valence = args.valence if args.valence else COMMON_WORKING_IONS.get(oe)
+    if not valence:
+        raise SystemExit("Working ion {} not supported. Provide its valence with -v".format(oe))
+    oe_list, v_list = entry.get_vc_plot_data(oe, valence=valence, entries=entries, allowpmu=args.posmu)
     print(entry.get_printable_vc_plot_data(oe, oe_list, v_list))
-    entry.get_voltage_profile_plot(oe, oe_list, v_list, valence).show()
-
+    plot = entry.get_voltage_profile_plot(oe, oe_list, v_list, valence)
+    if args.save:
+        plot.savefig(args.save, bbox_inches='tight')
+    elif not args.noplot:
+        plot.show()
+    return 0
 
 
 def main():
@@ -60,14 +70,18 @@ def main():
 --BRIEF INTRO--
     This script will analyze the stability of a phase with any given input composition
     Either in a closed system (phase diagram) or in a system with an open element(grand potential phase diagram)
-    This script works based on several sub-commands with their own options. 
-    To see the options for the sub-commands, use "python phase_stability.py sub-command -h". 
+    This script works based on several sub-commands with their own options.
+    To see the options for the sub-commands, use "phase_stability sub-command -h".
     """, epilog="""
---REMINDER--    
-    To use this script, you need to set following variable in ~/.pmgrc.yaml:
-    PMG_MAPI_KEY :[Mandatory] the API key for MP to fetch data from MP website.
-    PMG_PD_PRELOAD_PATH : [Optional] the local directory for saved cached data.
+--REMINDER--
+    To use this script, you need a Materials Project API key (https://next-gen.materialsproject.org/api):
+    MP_API_KEY : [Mandatory] environment variable with your API key
+                 (or PMG_MAPI_KEY in ~/.pmgrc.yaml)
+    IFS_CACHE_DIR : [Optional] a local directory to cache downloaded entries
+                 (or PMG_PD_PRELOAD_PATH in ~/.pmgrc.yaml)
     """)
+    parser.add_argument("--thermo-type", default=mpdata.DEFAULT_THERMO_TYPE, choices=mpdata.THERMO_TYPES,
+                        help="Materials Project thermo type to use (default: %(default)s)")
 
     parent_comp_mp = argparse.ArgumentParser(add_help=False)
     parent_comp_mp.add_argument("composition", type=str, help="The composition for analysis")
@@ -81,13 +95,19 @@ def main():
     parent_posmu.add_argument("-posmu", action='store_true', default=False,
                              help="Allow mu range to go beyond 0 and become positive")
 
+    parent_plot = argparse.ArgumentParser(add_help=False)
+    parent_plot.add_argument("--save", type=str, default=None, metavar="FILE",
+                             help="Save the figure to FILE (e.g. plot.png) instead of showing it")
+    parent_plot.add_argument("--noplot", action='store_true', default=False, help="Do not make a figure")
+
     subparsers = parser.add_subparsers()
 
     parser_stability = subparsers.add_parser("stability", parents=[parent_comp_mp],
                                              help="Obtain the phase equilibria of a phase with given composition")
     parser_stability.set_defaults(func=get_phase_equilibria_from_composition)
 
-    parser_evolution = subparsers.add_parser("evolution", parents=[parent_comp_mp, parent_oe, parent_posmu],
+    parser_evolution = subparsers.add_parser("evolution", parents=[parent_comp_mp, parent_oe, parent_posmu,
+                                                                   parent_plot],
                                              help="Obtain the evolution profile at a given composition when open to an element")
 
     parser_evolution.set_defaults(func=get_phase_evolution_profile)
@@ -96,11 +116,7 @@ def main():
                                        help="Obtain the phase equilibria & decomposition energy of a phase with given composition when open to an element")
     parser_mu.set_defaults(func=get_phase_equilibria_and_decomposition_energy_under_mu_from_composition)
 
-    # parser_plot_gppd = subparsers.add_parser("plotgppd", parents=[parent_comp_mp, parent_oe, parent_miu],
-    #                                          help="Obtain the grand potential phase diagram of a given material system under certain chemical potential")
-    # parser_plot_gppd.set_defaults(func=plot_gppd)
-
-    parser_plot_vc = subparsers.add_parser("plotvc", parents=[parent_comp_mp, parent_oe, parent_posmu],
+    parser_plot_vc = subparsers.add_parser("plotvc", parents=[parent_comp_mp, parent_oe, parent_posmu, parent_plot],
                                            help="Plot the voltage profile of at a given composition")
     parser_plot_vc.add_argument('-v', '--valence', type=int, default=None, help='Valence of Working ion')
 
@@ -108,9 +124,12 @@ def main():
 
     args = parser.parse_args()
 
-
     if hasattr(args, "func"):
-        args.func(args)
+        mpdata.set_thermo_type(args.thermo_type)
+        try:
+            args.func(args)
+        except (RuntimeError, ImportError) as err:
+            raise SystemExit("Error: {}".format(err))
     else:
         parser.print_help()
 

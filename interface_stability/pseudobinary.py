@@ -3,10 +3,10 @@
 # Distributed under the terms of the MIT License.
 
 import pandas
-from pymatgen import Composition, Element
+from pymatgen.core import Composition, Element
 from pymatgen.analysis.phase_diagram import PhaseDiagram, GrandPotentialPhaseDiagram, GrandPotPDEntry
 from pymatgen.analysis.reaction_calculator import ComputedReaction, ReactionError
-from interface_stability.singlephase import VirtualEntry
+from interface_stability.singlephase import VirtualEntry, element_symbol
 
 
 __author__ = "Yizhou Zhu"
@@ -43,8 +43,8 @@ class PseudoBinary(object):
 
         if not entries:
             entry_mix = VirtualEntry.from_composition(comp1 + comp2)
-            entries = entry_mix.get_PD_entries(sup_el=sup_el)
-        entries += [entry1, entry2]
+            entries = [e for e in entry_mix.get_PD_entries(sup_el=sup_el) if e is not entry_mix]
+        entries = list(entries) + [entry1, entry2]
         self.PDEntries = entries
         self.PD = PhaseDiagram(entries)
 
@@ -115,24 +115,32 @@ class PseudoBinary(object):
         It will give a complete evolution profile for mixing ratio x change from 0 to 1.
         x is the ratio (both entry norm. to 1 atom/fu(w/o open element) ) or each entry
         """
-        open_el = list(chempots.keys())[0]
-        el_ref = VirtualEntry.get_mp_entry(open_el)
-        chempots[open_el] = chempots[open_el] + el_ref.energy_per_atom
-        gppd_entry1 = GrandPotPDEntry(self.entry1, {Element[_]: chempots[_] for _ in chempots})
-        gppd_entry2 = GrandPotPDEntry(self.entry2, {Element[_]: chempots[_] for _ in chempots})
+        if len(chempots) != 1:
+            raise ValueError("gppd_mixing supports exactly one open element")
+        open_el, mu = list(chempots.items())[0]
+        open_el = Element(element_symbol(open_el))
         if not gppd_entries:
             gppd_entries = self.get_gppd_entries(open_el)
+        # Use the element reference from the same entries, so all energies share one scale
+        el_ref = PhaseDiagram(gppd_entries).el_refs[open_el]
+        chempots = {open_el: mu + el_ref.energy_per_atom}
+        gppd_entry1 = GrandPotPDEntry(self.entry1, chempots)
+        gppd_entry2 = GrandPotPDEntry(self.entry2, chempots)
         gppd = GrandPotentialPhaseDiagram(gppd_entries, chempots)
-        profile = get_full_evolution_profile(gppd, gppd_entry1, gppd_entry2, 0, 1)
+        profile = get_full_evolution_profile(gppd, gppd_entry1, gppd_entry2, 0.0, 1.0)
         cleaned = clean_profile(profile)
         return cleaned
 
     def get_gppd_entries(self, open_el):
-        if open_el in (self.entry1.composition + self.entry2.composition).keys():
+        open_el = Element(element_symbol(open_el))
+        if open_el in (self.entry1.composition + self.entry2.composition):
             gppd_entries = self.PDEntries
         else:
             comp = self.entry1.composition + self.entry2.composition + Composition(open_el.symbol)
-            gppd_entries = VirtualEntry.from_composition(comp).get_GPPD_entries(open_el)
+            entry_mix = VirtualEntry.from_composition(comp)
+            gppd_entries = [e for e in entry_mix.get_PD_entries() if e is not entry_mix]
+            # The two phases themselves (with their stabilized / corrected energies)
+            gppd_entries += [e for e in self.PDEntries[-2:]]
         return gppd_entries
 
     def get_gppd_transition_chempots(self, open_el, gppd_entries=None):
@@ -141,11 +149,12 @@ class PseudoBinary(object):
         Still use pure element ref.
         # May consider supporting negative miu in the future
         """
+        open_el = Element(element_symbol(open_el))
         if not gppd_entries:
             gppd_entries = self.get_gppd_entries(open_el)
         pd = PhaseDiagram(gppd_entries)
-        vaspref_mius = pd.get_transition_chempots(Element(open_el))
-        el_ref = VirtualEntry.get_mp_entry(open_el)
+        vaspref_mius = pd.get_transition_chempots(open_el)
+        el_ref = pd.el_refs[open_el]
 
         elref_mius = [miu - el_ref.energy_per_atom for miu in vaspref_mius]
         return elref_mius
@@ -163,12 +172,13 @@ class PseudoBinary(object):
         :return: a printable string of screening results
         """
         mu_lo, mu_hi = sorted([mu_lo, mu_hi])
-        miu_E_candidates = [miu for miu in self.get_gppd_transition_chempots(open_el) if
-                            (miu - mu_lo) * (miu - mu_hi) <= 0]
-        miu_E_candidates = [mu_hi] + miu_E_candidates + [mu_lo]
-        duplicate_index = []
         if not gppd_entries:
             gppd_entries = self.get_gppd_entries(open_el)
+        # Transition chemical potentials strictly inside the range, from high to low
+        miu_E_candidates = [miu for miu in self.get_gppd_transition_chempots(open_el, gppd_entries) if
+                            mu_lo < miu < mu_hi]
+        miu_E_candidates = [mu_hi] + miu_E_candidates + [mu_lo]
+        duplicate_index = []
 
         for i in range(1, len(miu_E_candidates) - 1):
             miu_left = (miu_E_candidates[i] + miu_E_candidates[i - 1]) / 2.0
@@ -216,8 +226,8 @@ class PseudoBinary(object):
         df1 = pandas.DataFrame()
         df2 = pandas.DataFrame()
 
-        df1['mu_low'] = mu_hi_display_list
-        df1['mu_high'] = mu_low_display_list
+        df1['mu_high'] = mu_hi_display_list
+        df1['mu_low'] = mu_low_display_list
         df1['phase equilibria'] = PE_display_list
 
         df2['mu'] = mu_list
@@ -268,8 +278,8 @@ def get_full_evolution_profile(pd, entry1, entry2, x1, x2):
     :return: An uncleaned but complete profile with all transition points.
     """
     evolution_profile = {}
-    entry_left = get_mix_entry({entry1: x1, entry2: 1 - x1})
-    entry_right = get_mix_entry({entry1: x2, entry2: 1 - x2})
+    entry_left = get_mix_entry(entry1, entry2, x1)
+    entry_right = get_mix_entry(entry1, entry2, x2)
     (decomp1, h1) = pd.get_decomp_and_e_above_hull(entry_left)
     (decomp2, h2) = pd.get_decomp_and_e_above_hull(entry_right)
     decomp1 = set(decomp1.keys())
@@ -285,15 +295,11 @@ def get_full_evolution_profile(pd, entry1, entry2, x1, x2):
         # This is try to catch a single transition point
         try:
             rxn = ComputedReaction([entry_left, entry_right], list(intersect))
-            if not {entry_left, entry_right} < set(rxn.all_entries):
+            c1 = _entry_coeff(rxn, entry_left)
+            c2 = _entry_coeff(rxn, entry_right)
+            if c1 is None or c2 is None or c1 * c2 <= 0:
                 return evolution_profile
-
-            c1 = rxn.coeffs[rxn.all_entries.index(entry_left)]
-            c2 = rxn.coeffs[rxn.all_entries.index(
-                entry_right)]  # I know this is tedious but this is the only way I found that works..
             x = (c1 * x1 + c2 * x2) / (c1 + c2)
-            if c1 * c2 == 0:
-                return evolution_profile
             entry_mid = VirtualEntry.from_mixing({entry_left: c1 / (c1 + c2), entry_right: c2 / (c1 + c2)})
             h_mid = pd.get_decomp_and_e_above_hull(entry_mid)[1]
             evolution_profile[x] = (intersect, h_mid)
@@ -302,7 +308,7 @@ def get_full_evolution_profile(pd, entry1, entry2, x1, x2):
             pass
 
     x_mid = (x1 + x2) / 2.0
-    entry_mid = get_mix_entry({entry1: 0.5, entry2: 0.5})
+    entry_mid = get_mix_entry(entry1, entry2, x_mid)
     (decomp_mid, h_mid) = pd.get_decomp_and_e_above_hull(entry_mid)
     decomp_mid = set(decomp_mid.keys())
     evolution_profile[x_mid] = (decomp_mid, h_mid)
@@ -311,6 +317,19 @@ def get_full_evolution_profile(pd, entry1, entry2, x1, x2):
     evolution_profile.update(part1)
     evolution_profile.update(part2)
     return evolution_profile
+
+
+def _entry_coeff(rxn, entry):
+    """
+    The coefficient of an entry in a reaction, in units of the entry's own composition
+    (not its reduced composition). None if the entry is not in the reaction.
+    Entries are matched on their composition, which for GrandPotPDEntry excludes the open element.
+    """
+    comp = entry.composition
+    reduced = comp.reduced_composition
+    if reduced not in rxn.all_comp:
+        return None
+    return rxn.get_coeff(reduced) * reduced.num_atoms / comp.num_atoms
 
 
 def clean_profile(evolution_profile):
@@ -331,13 +350,13 @@ def clean_profile(evolution_profile):
     return clean_set
 
 
-def get_mix_entry(mix_dict):
+def get_mix_entry(entry1, entry2, x):
     """
     Mixing PDEntry or GrandPotEntry for the binary search algorithm.
+    :return: the mixture x * entry1 + (1 - x) * entry2
     """
-    entry1, entry2 = mix_dict.keys()
-    x1, x2 = mix_dict[entry1], mix_dict[entry2]
-    if type(entry1) == GrandPotPDEntry:
+    x1, x2 = x, 1 - x
+    if isinstance(entry1, GrandPotPDEntry):
         mid_ori_entry = VirtualEntry.from_mixing({entry1.original_entry: x1, entry2.original_entry: x2})
         return GrandPotPDEntry(mid_ori_entry, entry1.chempots)
     else:
