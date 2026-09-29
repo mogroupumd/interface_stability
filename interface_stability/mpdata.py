@@ -84,6 +84,35 @@ def _cache_path(elements, thermo_type):
     return os.path.join(cache_dir, name)
 
 
+def _json_safe(obj):
+    """
+    Return a copy of obj with dict keys that JSON cannot encode (e.g. the Element keys
+    of MP's "oxidation_states" data) turned into strings.
+    """
+    if isinstance(obj, dict):
+        return {k if isinstance(k, (str, int, float, bool)) or k is None else str(k): _json_safe(v)
+                for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_json_safe(v) for v in obj]
+    return obj
+
+
+def _write_cache(path, entries):
+    dicts = []
+    for entry in entries:
+        data = entry.data
+        entry.data = _json_safe(data)
+        try:
+            dicts.append(entry.as_dict())
+        finally:
+            entry.data = data
+    # Write to a temporary file first so a failed write never leaves a truncated cache.
+    tmp_path = path + ".tmp"
+    with open(tmp_path, "w") as f:
+        json.dump(dicts, f, cls=MontyEncoder)
+    os.replace(tmp_path, path)
+
+
 def get_entries_in_chemsys(chemsys, use_cache=True):
     """
     Get all MP entries in a chemical system, including all of its subsystems.
@@ -106,14 +135,16 @@ def get_entries_in_chemsys(chemsys, use_cache=True):
     path = _cache_path(elements, _thermo_type) if use_cache else None
     entries = None
     if path and os.path.isfile(path):
-        with open(path) as f:
-            entries = json.load(f, cls=MontyDecoder)
+        try:
+            with open(path) as f:
+                entries = json.load(f, cls=MontyDecoder)
+        except ValueError:
+            entries = None  # unreadable cache file; fetch again and overwrite it
     if entries is None:
         with _mprester() as m:
             entries = m.get_entries_in_chemsys(elements, additional_criteria={"thermo_types": [_thermo_type]})
         if path:
-            with open(path, "w") as f:
-                json.dump(entries, f, cls=MontyEncoder)
+            _write_cache(path, entries)
 
     if use_cache:
         _memory_cache[key] = entries

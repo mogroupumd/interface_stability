@@ -67,6 +67,26 @@ class TestMPData(OfflineTestCase):
             finally:
                 del os.environ["IFS_CACHE_DIR"]
 
+    def test_disk_cache_write_with_element_keys(self):
+        # MP entries carry data["oxidation_states"] keyed by Element, which plain JSON cannot encode.
+        import tempfile
+
+        entries = mpdata.get_entries_in_chemsys(["Li", "S"])
+        for e in entries:
+            e.data = {"oxidation_states": {el: 0.0 for el in e.composition.elements}}
+        with tempfile.TemporaryDirectory() as tmp:
+            os.environ["IFS_CACHE_DIR"] = tmp
+            try:
+                path = mpdata._cache_path(["Li", "S"], mpdata.get_thermo_type())
+                mpdata._write_cache(path, entries)
+                self.assertIsInstance(next(iter(entries[0].data["oxidation_states"])), Element)
+                mpdata.clear_memory_cache()
+                cached = mpdata.get_entries_in_chemsys(["Li", "S"])
+                self.assertEqual(sorted(e.name for e in cached), ["Li", "Li2S", "S"])
+                self.assertEqual(cached[0].data["oxidation_states"], {cached[0].composition.elements[0].symbol: 0.0})
+            finally:
+                del os.environ["IFS_CACHE_DIR"]
+
     def test_bad_thermo_type(self):
         with self.assertRaises(ValueError):
             mpdata.set_thermo_type("PBE")
