@@ -32,54 +32,57 @@ DOI:10.1063/1.4812323
 
 ## Install
 
-This package works with both Python 2.7+ and Python 3.x. However, it is suggested to use Python 3.x, as the dependent package Pymatgen will be py3k only in the future.
+This package needs Python 3.10 or newer. It uses the current [pymatgen](https://pymatgen.org/) and the
+next-gen Materials Project API client ([mp-api](https://github.com/materialsproject/api)).
 
+1. Clone this package from GitHub and install it. The dependencies are installed automatically.
 
-1. Install all dependency packages 
-
-    Use your favorite way to install [pymatgen](http://pymatgen.org/) first.
-    
-2. install this interface_stability package.
-
-    clone this package from github
-    
     ```bash
     $ git clone https://github.com/mogroupumd/interface_stability.git
-    ```
-    
-    install the package
-    ```bash
-    $ python setup.py install --user
-    ``` 
-    
-3. Try to import python classes in your python console
-
-    ```bash
-    $ python
-    >>> from interface_stability import singlephase
+    $ cd interface_stability
+    $ python -m venv .venv && source .venv/bin/activate
+    $ pip install -e .
     ```
 
-4. The setup.py will automatically create an executable file phase_stability and pseudo_binary
- into your PATH. Try to call it from terminal and read the documentations:
+2. Set up your Materials Project API key. This enables you to fetch data from the Materials Project database.
+   Your API key is on your dashboard at https://next-gen.materialsproject.org/api (login required).
+   Legacy (pre-2022) keys do not work.
+
+   Either set an environment variable:
+   ```bash
+   $ export MP_API_KEY="your API key"
+   ```
+   or put the key in your pymatgen settings file, ~/.pmgrc.yaml (create it if it does not exist):
+   ```bash
+   PMG_MAPI_KEY: your API key
+   ```
+
+3. Optional: cache downloaded entries on disk, so repeated runs are faster and can work offline.
+   Set `IFS_CACHE_DIR` to a folder (or `PMG_PD_PRELOAD_PATH` in ~/.pmgrc.yaml). Delete the cached
+   files to pick up changes to the Materials Project database.
+
+4. The install creates two commands, phase_stability and pseudo_binary. Try them and read the documentation:
 
     ```bash
     $ phase_stability -h
     $ pseudo_binary -h
     ```
-    
-5. Setup Materials Project API key. This enables you to fetch data from the Materials Project database.
-   
-   The documentation is at 
-   https://materialsproject.org/open
-   
-   Your API key is at (login required)
-   https://materialsproject.org/dashboard
-   
-   You need to put the API key in ~/.pmgrc.yaml file. (Create this file if not exist)
-   ```bash
-   PMG_MAPI_KEY: [Your API key goes here]
-   ```
-   
+
+5. Run the tests. The offline tests use a small made-up data set; the live tests run only when an API key is set.
+
+    ```bash
+    $ pip install pytest
+    $ pytest interface_stability/tests
+    ```
+
+### Notes on the Materials Project data
+
+* Energies come from the `GGA_GGA+U` thermo type (GGA/GGA+U with MaterialsProject2020Compatibility corrections),
+  the same method as the papers above. Use `--thermo-type GGA_GGA+U_R2SCAN` (before the sub-command) to use
+  the mixed GGA/GGA+U/r2SCAN data shown on the Materials Project website, e.g.
+  `phase_stability --thermo-type GGA_GGA+U_R2SCAN stability Li3PS4`.
+* The Materials Project data has been updated since the examples below were made, so your numbers will differ somewhat.
+
 ## Usage
 
 There are two executable python scripts, both work with a few sub-commands options. 
@@ -90,6 +93,9 @@ For example,
 $ phase_stability -h
 $ phase_stability evolution -h
 ```
+
+The `evolution` and `plotvc` sub-commands make a figure. Add `--save plot.png` to save it to a file instead of
+showing it, or `--noplot` to skip it.
 
 ### 1. scripts/phase_stability.py
 
