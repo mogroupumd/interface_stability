@@ -226,10 +226,6 @@ other than the open element.
 
 The minima of the reaction energy and of the mutual reaction energy are marked in the comment column.
 
-Note: the example below was made with an older version, which weighted the two phases wrongly in the mutual
-reaction energy when they contain different fractions of the open element. The current version gives different
-values in that column (and may mark a different minimum).
-
 ```bash
 $ pseudo_binary gppd LiCoO2 Li3PS4 Li -5
 ---------------------------------------------------------------------------------------------------- 
@@ -239,19 +235,19 @@ Chemical potential is miu_Li = -5.0, using elementary phase as reference.
 ------------------------------------------------------------
 
  ===  Pseudo-binary evolution profile  === 
-x(Li3PS4)  x(LiCoO2)  Rxn. E. (meV/atom)  Mutual Rxn. E. (meV/atom)     Phase Equilibria           Comment       
-  1.00      -0.00         -1,547.69                  0.00                            P2S7, S                     
-  0.99       0.01         -1,601.10                -68.74                    CoS2, P2S7, S8O                     
-  0.58       0.42         -1,679.16               -606.19                 CoS2, CoP4O11, S8O                     
-  0.55       0.45         -1,679.82               -631.65                Co(PO3)2, CoS2, S8O         Rxn. E. Min.
-  0.41       0.59         -1,568.49               -677.13              Co(PO3)2, CoS2, CoSO4                     
-  0.33       0.67         -1,496.84               -695.56             CoS2, CoSO4, Co3(PO4)2                     
-  0.29       0.71         -1,458.93               -704.30            Co3S4, CoSO4, Co3(PO4)2  Mutual Rxn. E. Min.
-  0.26       0.74         -1,420.64               -704.18            CoSO4, Co3(PO4)2, Co9S8                     
-  0.12       0.88         -1,182.46               -618.68              CoO, CoSO4, Co3(PO4)2                     
-  0.10       0.90         -1,104.35               -569.65            Co3(PO4)2, CoSO4, Co3O4                     
-  0.09       0.91         -1,075.28               -545.43                CoSO4, Co3O4, CoPO4                     
-  0.00       1.00           -428.07                  0.00                               CoO2
+ x(Li3PS4)  x(LiCoO2)  Rxn. E. (meV/atom)  Mutual Rxn. E. (meV/atom)      Phase Equilibria           Comment      
+   1.00       0.00         -1,568.78                  0.00                             P2S7, S                    
+   0.59       0.41         -1,626.47               -580.82                    CoP4O11, CoS2, S        Rxn. E. Min.
+   0.51       0.49         -1,613.45               -669.84                  CoP4O11, SO2, CoS2                    
+   0.44       0.56         -1,568.80               -698.94                CoP4O11, CoSO4, CoS2                    
+   0.37       0.63         -1,512.86               -721.89                CoSO4, Co2P2O7, CoS2                    
+   0.33       0.67         -1,478.11               -726.19              CoSO4, Co3(PO4)2, CoS2 Mutual Rxn. E. Min.
+   0.29       0.71         -1,432.39               -725.19             CoSO4, Co3S4, Co3(PO4)2                    
+   0.26       0.74         -1,386.49               -715.40             CoSO4, Co9S8, Co3(PO4)2                    
+   0.12       0.88         -1,142.14               -611.29               CoSO4, CoO, Co3(PO4)2                    
+   0.10       0.90         -1,035.88               -531.00             CoSO4, Co3O4, Co3(PO4)2                    
+   0.09       0.91         -1,002.72               -503.31           CoSO4, Co3(PO4)2, Co23O32                    
+   0.00       1.00           -411.55                  0.00                                CoO2
 ```
 
 **pseudo_binary gppd_screen composition_1 composition_2 open_element miu_low miu_high**
