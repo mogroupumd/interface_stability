@@ -4,16 +4,19 @@ from the energies listed there. No Materials Project access is needed.
 """
 import os
 import unittest
+from unittest import mock
 
 import matplotlib
+import numpy
 
 matplotlib.use("Agg")
 
 from pymatgen.core import Composition, Element  # noqa: E402
 from pymatgen.analysis.phase_diagram import PhaseDiagram  # noqa: E402
+from pymatgen.entries.computed_entries import ComputedEntry  # noqa: E402
 
 from interface_stability import mpdata  # noqa: E402
-from interface_stability.pseudobinary import PseudoBinary, get_mix_entry  # noqa: E402
+from interface_stability.pseudobinary import PseudoBinary, get_mix_entry, get_mutual_rxn_energies  # noqa: E402
 from interface_stability.singlephase import VirtualEntry  # noqa: E402
 from interface_stability.tests import synthetic  # noqa: E402
 
@@ -91,6 +94,67 @@ class TestMPData(OfflineTestCase):
         with self.assertRaises(ValueError):
             mpdata.set_thermo_type("PBE")
 
+    def test_unusable_disk_cache_is_fetched_again(self):
+        import tempfile
+
+        fetched = synthetic.get_entries()
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.object(mpdata, "get_cache_dir", return_value=tmp), \
+                mock.patch.object(mpdata, "_query", return_value=fetched) as query:
+            path = mpdata._cache_path(["Li", "S"], mpdata.get_thermo_type())
+            # A damaged file, and one that decodes to something other than entries
+            for content in ("[{", '[{"@module": "no.such.module", "@class": "Entry"}]'):
+                with open(path, "w") as f:
+                    f.write(content)
+                mpdata.clear_memory_cache()
+                self.assertEqual(mpdata.get_entries_in_chemsys(["Li", "S"]), fetched)
+                # The file is rewritten, and no temporary file is left behind
+                self.assertEqual(os.listdir(tmp), [os.path.basename(path)])
+                self.assertEqual(len(mpdata._read_cache(path)), len(fetched))
+            self.assertEqual(query.call_count, 2)
+
+    def test_mixed_thermo_type_does_not_use_superset(self):
+        # Mixed GGA/GGA+U/r2SCAN energies depend on the chemical system queried
+        subset = [e for e in synthetic.get_entries() if e.composition.chemical_system in ("Li", "S", "Li-S")]
+        mpdata.set_thermo_type("GGA_GGA+U_R2SCAN")
+        try:
+            mpdata.seed_cache(ALL_ELEMENTS, synthetic.get_entries())
+            with mock.patch.object(mpdata, "get_cache_dir", return_value=None), \
+                    mock.patch.object(mpdata, "_query", return_value=subset) as query:
+                self.assertEqual(mpdata.get_entries_in_chemsys(["Li", "S"]), subset)
+            query.assert_called_once()
+        finally:
+            mpdata.set_thermo_type(mpdata.DEFAULT_THERMO_TYPE)
+
+    def test_mixed_thermo_type_needs_recent_mp_api(self):
+        with mock.patch("importlib.metadata.version", return_value="0.45.15"):
+            with self.assertRaisesRegex(RuntimeError, mpdata.MIN_MP_API_VERSION_FOR_MIXED):
+                mpdata.set_thermo_type("GGA_GGA+U_R2SCAN")
+        self.assertEqual(mpdata.get_thermo_type(), mpdata.DEFAULT_THERMO_TYPE)
+
+    def test_mp_errors_are_reported_as_mpdataerror(self):
+        from mp_api.client.core import MPRestError
+
+        class FailingRester:
+            def __init__(self, api_key):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def get_entries_in_chemsys(self, *args, **kwargs):
+                raise MPRestError("REST query returned with error status code 401")
+
+        mpdata.clear_memory_cache()
+        with mock.patch.object(mpdata, "_mp_client", return_value=(FailingRester, MPRestError)), \
+                mock.patch.object(mpdata, "get_api_key", return_value="key"), \
+                mock.patch.object(mpdata, "get_cache_dir", return_value=None):
+            with self.assertRaisesRegex(mpdata.MPDataError, "401"):
+                mpdata.get_entries_in_chemsys(["Li", "S"])
+
 
 class TestSinglePhase(OfflineTestCase):
     def test_phase_equilibria(self):
@@ -144,6 +208,17 @@ class TestSinglePhase(OfflineTestCase):
         hi, lo = entry.get_stability_window("Li", entries=entries)
         self.assertAlmostEqual(hi, -1.84, places=5)
         self.assertAlmostEqual(lo, -6.55 / 3, places=5)
+
+    def test_stability_window_posmu(self):
+        # Li3P is the most Li-rich phase: stable up to Li metal (mu = 0), or without an upper bound once
+        # positive mu is allowed. 3 Li + P -> Li3P, dE = 4 * -0.9 = -3.6 eV, so the lower bound is mu = -1.2
+        entry, entries = self.stabilized("Li3P", sup_el=["Li"])
+        hi, lo = entry.get_stability_window("Li", entries=entries)
+        self.assertAlmostEqual(hi, 0, places=6)
+        self.assertAlmostEqual(lo, -1.2, places=6)
+        hi, lo = entry.get_stability_window("Li", entries=entries, allowpmu=True)
+        self.assertIsNone(hi)
+        self.assertAlmostEqual(lo, -1.2, places=6)
 
     def test_stability_window_without_lower_bound(self):
         # 2 Li + S -> Li2S, dE = 3 * -1.4 = -4.2 eV, so S is stable below mu_Li = -2.1
@@ -199,20 +274,42 @@ class TestSinglePhase(OfflineTestCase):
         with self.assertRaises(ValueError):
             entry.get_vc_plot_data("S", entries=entries)
 
+    def test_import_leaves_matplotlib_settings(self):
+        defaults = matplotlib.rc_params()
+        for key in ("font.size", "mathtext.default"):
+            self.assertEqual(matplotlib.rcParams[key], defaults[key], key)
+
 
 class TestPseudoBinary(OfflineTestCase):
-    def make_pb(self, f1, f2):
+    def make_pb(self, f1, f2, e1_correction=0.0):
         e1 = VirtualEntry.from_composition(f1)
         e2 = VirtualEntry.from_composition(f2)
         mix = VirtualEntry.from_composition(Composition(f1) + Composition(f2))
         entries = [e for e in mix.get_PD_entries() if e is not mix]
         e1.stabilize(entries=entries)
         e2.stabilize(entries=entries)
+        e1.energy_correction(e1_correction)
         return PseudoBinary(e1, e2, entries=entries), entries
+
+    def assert_profile_matches_sampling(self, pd, entry1, entry2, profile, n=2001):
+        """
+        Each point of the profile has the phases that the phase diagram gives there, and each phase
+        region met when sampling the mixing line is bounded by a point of the profile.
+        """
+        def phases(x):
+            return frozenset(e.name for e in pd.get_decomposition(get_mix_entry(entry1, entry2, x).composition))
+
+        points = [frozenset(e.name for e in decomp) for _, (decomp, _) in profile]
+        for (x, _), names in zip(profile, points):
+            self.assertEqual(names, phases(x), x)
+        for x in numpy.linspace(0, 1, n):
+            region = phases(x)
+            self.assertTrue(any(p <= region for p in points), (x, sorted(region)))
 
     def test_does_not_modify_given_entries(self):
         pb, entries = self.make_pb("Li2S", "P2S5")
         self.assertEqual(len(pb.PDEntries), len(entries) + 2)
+        self.assertIn(pb, {pb})  # hashable
 
     def test_mix_entry(self):
         a = VirtualEntry.from_composition("Li", energy=-1)
@@ -249,6 +346,41 @@ class TestPseudoBinary(OfflineTestCase):
         for x, (decomp, e) in profile:
             mix = get_mix_entry(pb.entry1, pb.entry2, x)
             self.assertAlmostEqual(pb.PD.get_decomp_and_e_above_hull(mix)[1], e, places=6)
+        self.assert_profile_matches_sampling(pb.PD, pb.entry1, pb.entry2, profile)
+
+    def test_pd_mixing_five_elements(self):
+        # A made-up 5-element system (found by comparing with sampling) where the search used to skip the
+        # phase regions with Co + CoSO2 near x = 0.82, and gave the wrong phases at the point it reported there.
+        compounds = {"LiCo4P4O6": -1.874, "Co3P4S6": -1.784, "Co3S3O6": -1.645, "Li6P4S5O4": -1.916,
+                     "Li2P6S2O3": -1.851}
+        entries = [ComputedEntry(el, 0.0) for el in ("Li", "P", "S", "O", "Co")]
+        entries += [ComputedEntry(f, e * Composition(f).num_atoms) for f, e in compounds.items()]
+        e1 = VirtualEntry.from_composition("LiCo3P4SO3")
+        e2 = VirtualEntry.from_composition("CoS4O2")
+        e1.stabilize(entries=entries)
+        e2.stabilize(entries=entries)
+        pb = PseudoBinary(e1, e2, entries=entries)
+        profile = pb.pd_mixing()
+        self.assert_profile_matches_sampling(pb.PD, pb.entry1, pb.entry2, profile)
+        self.assertEqual([round(x, 3) for x, _ in profile], [0, 0.515, 0.818, 0.823, 0.929, 1])
+        self.assertEqual(sorted(d.name for d in profile[2][1][0]),
+                         ["Co3(P2S3)2", "CoSO2", "Li6P4S5O4", "LiCo4(P2O3)2"])
+
+    def test_pd_mixing_keeps_end_above_hull(self):
+        # Li7P3S11 + Li2S -> 3 Li3PS4 at x(Li7P3S11) = 21 / 24. The Li7P3S11 composition lies on the Li3PS4-P2S5
+        # tie line at (7/3 * 8 * -0.95 + 1/3 * 7 * -0.3) / 21 = -0.877778 eV/atom, so the reaction energy there
+        # is 0.875 * -0.877778 + 0.125 * -1.4 + 0.95 = -1/144 eV/atom. Putting Li7P3S11 0.02 eV/atom above the
+        # hull lowers the reaction energy by 0.875 * 0.02 but leaves the mutual reaction energy unchanged,
+        # and the Li7P3S11 end (which then decomposes into Li3PS4 + P2S5) must stay in the profile.
+        for correction in (0.0, 0.02):
+            pb, _ = self.make_pb("Li7P3S11", "Li2S", e1_correction=correction)
+            profile = pb.pd_mixing()
+            self.assertEqual([round(x, 6) for x, _ in profile], [0, 0.875, 1])
+            x, (decomp, e) = profile[1]
+            self.assertEqual([d.name for d in decomp], ["Li3PS4"])
+            self.assertAlmostEqual(-e, -1 / 144 - 0.875 * correction, places=6)
+            self.assertAlmostEqual(get_mutual_rxn_energies(profile)[1], -1 / 144, places=6)
+            self.assertIn("-6.94", pb.get_printable_pd_profile())
 
     def test_gppd_mixing(self):
         # At mu_Li = -1.97 Li3PS4 is stable. The Li3PS4 point is at the same x as in the closed system,
@@ -263,6 +395,53 @@ class TestPseudoBinary(OfflineTestCase):
         self.assertAlmostEqual(x, 0.5625, places=6)
         self.assertAlmostEqual(e, 0.05, places=6)
         self.assertIn("Minimum", pb.get_printable_gppd_profile({"Li": -1.97}))
+
+    def test_gppd_mutual_rxn_energy(self):
+        # At mu_Li = -2.15 Li2S is oxidized on its own: Li2S -> S + 2 Li, 4.2 + 2 * -2.15 = -0.1 eV per S atom.
+        # Li3PS4 is still stable, so at x(Li2S) = 0.5625 the mixture forms Li3PS4 without exchanging Li:
+        # -0.03125 eV per atom, i.e. -0.05 eV per non-Li atom (0.625 per atom). Li2S on its own would give
+        # 0.5625 / 3 * -0.1 = -0.01875 eV per atom of the mixture, so the mutual reaction energy is
+        # (-0.03125 + 0.01875) / 0.625 = -0.02 eV per non-Li atom. It used to come out as +6.25 meV.
+        pb, _ = self.make_pb("Li2S", "P2S5")
+        n1, n2 = pb.get_non_open_fractions("Li")
+        self.assertAlmostEqual(n1, 1 / 3)
+        self.assertAlmostEqual(n2, 1)
+        profile = pb.gppd_mixing({"Li": -2.15})
+        self.assertEqual([sorted(d.name for d in decomp) for _, (decomp, _) in profile],
+                         [["P2S5"], ["Li3PS4"], ["S"]])
+        mutual = get_mutual_rxn_energies(profile, n1, n2)
+        self.assertAlmostEqual(profile[1][1][1], 0.05, places=6)
+        self.assertAlmostEqual(profile[-1][1][1], 0.1, places=6)
+        self.assertAlmostEqual(mutual[1], -0.02, places=6)
+        self.assertIn("-20.00", pb.get_printable_gppd_profile({"Li": -2.15}))
+
+    def test_gppd_keeps_both_ends(self):
+        # At mu_Li = -3, Li3PS4 -> P2S5 + S and Li2S -> S on their own, and a mixture of them does no more.
+        # Both ends stay in the profile whichever phase comes first.
+        for f1, f2 in (("Li3PS4", "Li2S"), ("Li2S", "Li3PS4")):
+            pb, _ = self.make_pb(f1, f2)
+            profile = pb.gppd_mixing({"Li": -3})
+            self.assertEqual([x for x, _ in profile], [0, 1])
+            ends = {f2: profile[0][1], f1: profile[1][1]}
+            self.assertEqual(sorted(d.name for d in ends["Li3PS4"][0]), ["P2S5", "S"])
+            self.assertEqual(sorted(d.name for d in ends["Li2S"][0]), ["S"])
+            self.assertEqual(get_mutual_rxn_energies(profile, *pb.get_non_open_fractions("Li")), [0, 0])
+
+    def test_gppd_mixing_matches_sampling(self):
+        from pymatgen.analysis.phase_diagram import GrandPotentialPhaseDiagram, GrandPotPDEntry
+
+        pb, _ = self.make_pb("Li2S", "P2S5")
+        li_ref = PhaseDiagram(pb.PDEntries).el_refs[Element("Li")].energy_per_atom
+        for mu in (-0.5, -1.5, -2.0, -2.15, -3.0):
+            chempots = {Element("Li"): mu + li_ref}
+            gppd = GrandPotentialPhaseDiagram(pb.PDEntries, chempots)
+            g1, g2 = GrandPotPDEntry(pb.entry1, chempots), GrandPotPDEntry(pb.entry2, chempots)
+            self.assert_profile_matches_sampling(gppd, g1, g2, pb.gppd_mixing({"Li": mu}), n=501)
+
+    def test_gppd_open_element_only(self):
+        pb, _ = self.make_pb("Li", "P2S5")
+        with self.assertRaisesRegex(ValueError, "other than the open element"):
+            pb.gppd_mixing({"Li": -1})
 
     def test_gppd_open_element_not_in_phases(self):
         # Used to fail: get_GPPD_entries did not exist
@@ -316,6 +495,14 @@ class TestScripts(OfflineTestCase):
                       self.run_script(main, ["evolution", "Li3PS4", "Li", "--noplot"]))
         self.assertIn("inf", self.run_script(main, ["evolution", "-posmu", "Li3PS4", "Li", "--noplot"]))
         self.assertIn("1.84", self.run_script(main, ["plotvc", "Li3PS4", "Li", "--noplot"]))
+
+    def test_bad_input_is_reported_without_traceback(self):
+        from interface_stability.scripts import phase_stability, pseudo_binary
+
+        with self.assertRaisesRegex(SystemExit, "Error: .*Xx"):
+            self.run_script(phase_stability.main, ["stability", "Li3Xx"])
+        with self.assertRaisesRegex(SystemExit, "Error: .*other than the open element"):
+            self.run_script(pseudo_binary.main, ["gppd", "Li", "Li3PS4", "Li", "-1"])
 
     def test_pseudo_binary_commands(self):
         from interface_stability.scripts.pseudo_binary import main

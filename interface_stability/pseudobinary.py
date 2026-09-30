@@ -17,6 +17,9 @@ __email__ = "yizhou.zhu@gmail.com"
 __status__ = "Production"
 __date__ = "Jun 10, 2018"
 
+# Smallest mixing ratio interval the binary search splits further
+MIN_RATIO_INTERVAL = 1e-9
+
 
 class PseudoBinary(object):
     """
@@ -48,9 +51,6 @@ class PseudoBinary(object):
         self.PDEntries = entries
         self.PD = PhaseDiagram(entries)
 
-    def __eq__(self, other):
-        return self.__dict__ == other.__dict__
-
     def pd_mixing(self):
         """
         This function give the phase equilibria of a pseudo-binary in a closed system (PD).
@@ -65,30 +65,36 @@ class PseudoBinary(object):
         return self.get_printed_profile(self.pd_mixing())
 
     def get_printable_gppd_profile(self, chempots, gppd_entries=None):
-        return self.get_printed_profile(self.gppd_mixing(chempots, gppd_entries=gppd_entries))
+        profile = self.gppd_mixing(chempots, gppd_entries=gppd_entries)
+        n1, n2 = self.get_non_open_fractions(list(chempots.keys())[0])
+        return self.get_printed_profile(profile, n1, n2)
 
-    def get_printed_profile(self, profile):
+    def get_non_open_fractions(self, open_el):
+        """
+        The fraction of the atoms of entry1 and of entry2 that are not the open element.
+        Energies in a grand potential phase diagram are per atom of these elements.
+        """
+        open_el = Element(element_symbol(open_el))
+        return tuple(1 - entry.composition.get_atomic_fraction(open_el) for entry in (self.entry1, self.entry2))
+
+    def get_printed_profile(self, profile, n1=1.0, n2=1.0):
         """
         A general function to generate printable table strings for pseudo-binary mixing results
+        :param n1, n2: for a profile from gppd_mixing, the fraction of the atoms of entry1 and entry2
+            that are not the open element (see get_mutual_rxn_energies)
         """
         output = ['\n ===  Pseudo-binary evolution profile  === ']
         df = pandas.DataFrame()
-        rxn_e = []
-        mutual_rxn_e = []
-        E0 = -profile[0][1][1]
-        E1 = -profile[-1][1][1]
+        mutual_rxn_e = get_mutual_rxn_energies(profile, n1, n2)
 
         x1s, x2s, es, mes, pes = [], [], [], [], []
 
-        for item in profile:
-            ratio, (decomp, e) = item
+        for (ratio, (decomp, e)), mutual_e in zip(profile, mutual_rxn_e):
             x1s.append(1-ratio)
             x2s.append(ratio)
             es.append(-e*1000)
-            mes.append((-e - ratio * E1 - (1 - ratio) * E0) * 1000)
+            mes.append(mutual_e * 1000)
             pes.append(", ".join([x.name for x in decomp]))
-            rxn_e.append(-e)
-            mutual_rxn_e.append(((-e - ratio * E1 - (1 - ratio) * E0) * 1000))
         df["x({})".format(self.entry2.name)] = x1s
         df["x({})".format(self.entry1.name)] = x2s
         df["Rxn. E. (meV/atom)"] = es
@@ -113,12 +119,15 @@ class PseudoBinary(object):
         """
         This function give the phase equilibria of a pseudo-binary in a open system (GPPD).
         It will give a complete evolution profile for mixing ratio x change from 0 to 1.
-        x is the ratio (both entry norm. to 1 atom/fu(w/o open element) ) or each entry
+        x is the ratio of each entry, both entries norm. to 1 atom/fu (open element included, as in pd_mixing).
+        The energies are per atom of the mixture other than the open element.
         """
         if len(chempots) != 1:
             raise ValueError("gppd_mixing supports exactly one open element")
         open_el, mu = list(chempots.items())[0]
         open_el = Element(element_symbol(open_el))
+        if 0 in self.get_non_open_fractions(open_el):
+            raise ValueError("Both phases must contain an element other than the open element {}".format(open_el))
         if not gppd_entries:
             gppd_entries = self.get_gppd_entries(open_el)
         # Use the element reference from the same entries, so all energies share one scale
@@ -168,12 +177,26 @@ class PseudoBinary(object):
         :param mu_hi:  chemical potential upper bound
         :param mu_lo:  chemical potential lower bound
         :param gppd_entries: Supply GPPD entries manually. If you supply this, I assume you know what you are doing
-        :param verbose: whether to prune the PE result table
+        :param verbose: if True, list every chemical potential interval in the PE result table; otherwise merge
+            neighboring intervals with the same phase equilibria
         :return: a printable string of screening results
         """
         mu_lo, mu_hi = sorted([mu_lo, mu_hi])
         if not gppd_entries:
             gppd_entries = self.get_gppd_entries(open_el)
+        n1, n2 = self.get_non_open_fractions(open_el)
+
+        def min_mutual_point(miu):
+            """
+            (phase equilibria, mutual reaction energy, reaction energy) at the mixing ratio
+            with the lowest mutual reaction energy
+            """
+            profile = self.gppd_mixing({open_el: miu}, gppd_entries)
+            mutual = get_mutual_rxn_energies(profile, n1, n2)
+            i_min = min(range(len(profile)), key=lambda i: mutual[i])
+            ratio, (decomp, e) = profile[i_min]
+            return decomp, mutual[i_min], -e
+
         # Transition chemical potentials strictly inside the range, from high to low
         miu_E_candidates = [miu for miu in self.get_gppd_transition_chempots(open_el, gppd_entries) if
                             mu_lo < miu < mu_hi]
@@ -189,29 +212,19 @@ class PseudoBinary(object):
                 duplicate_index.append(i)
         miu_E_candidates = [miu_E_candidates[i] for i in range(len(miu_E_candidates)) if i not in duplicate_index]
 
-        mu_hi, miu_low, PE = [], [], []
+        interval_mu_hi, PE = [], []
         mu_list, E_mutual_list, E_total_list = [], [], []
 
         for i in range(1, len(miu_E_candidates)):
             miu = (miu_E_candidates[i] + miu_E_candidates[i - 1]) / 2.0
-            profile = self.gppd_mixing({open_el: miu}, gppd_entries)
-            E0 = -profile[0][1][1]
-            E1 = -profile[-1][1][1]
-            min_mutual = min(profile, key=lambda step: (-step[1][1] - step[0] * E1 - (1 - step[0]) * E0))
-            mu_hi.append(miu_E_candidates[i - 1])
-            miu_low.append(miu_E_candidates[i])
-            PE.append(", ".join(sorted([x.name for x in min_mutual[1][0]])))
-        for i in range(len(miu_E_candidates)):
-            profile_transition = self.gppd_mixing({open_el: miu_E_candidates[i]}, gppd_entries)
-            E0 = -profile_transition[0][1][1]
-            E1 = -profile_transition[-1][1][1]
-            min_mutual_transition = min(profile_transition,
-                                        key=lambda step: (-step[1][1] - step[0] * E1 - (1 - step[0]) * E0))
-            mu_list.append(miu_E_candidates[i])
-
-            E_mutual_list.append(
-                (-min_mutual_transition[1][1] - min_mutual_transition[0] * E1 - (1 - min_mutual_transition[0]) * E0))
-            E_total_list.append(-min_mutual_transition[1][1])
+            decomp = min_mutual_point(miu)[0]
+            interval_mu_hi.append(miu_E_candidates[i - 1])
+            PE.append(", ".join(sorted([x.name for x in decomp])))
+        for miu in miu_E_candidates:
+            _, e_mutual, e_total = min_mutual_point(miu)
+            mu_list.append(miu)
+            E_mutual_list.append(e_mutual)
+            E_total_list.append(e_total)
 
         to_be_hidden = []
         if not verbose:
@@ -219,7 +232,7 @@ class PseudoBinary(object):
                 if PE[i] == PE[i - 1]:
                     to_be_hidden.append(i)
 
-        mu_hi_display_list = [mu_hi[k] for k in range(len(mu_hi)) if k not in to_be_hidden]
+        mu_hi_display_list = [interval_mu_hi[k] for k in range(len(interval_mu_hi)) if k not in to_be_hidden]
         mu_low_display_list = mu_hi_display_list[1:] + [mu_lo]
         PE_display_list = [PE[k] for k in range(len(PE)) if k not in to_be_hidden]
 
@@ -287,25 +300,26 @@ def get_full_evolution_profile(pd, entry1, entry2, x1, x2):
     evolution_profile[x1] = (decomp1, h1)
     evolution_profile[x2] = (decomp2, h2)
 
-    if decomp1 == decomp2:
+    # If the phases at one end are a subset of those at the other end, the whole range lies in the
+    # phase region of the other end, so there is no transition inside it.
+    if decomp1 <= decomp2 or decomp2 <= decomp1:
         return evolution_profile
 
     intersect = decomp1 & decomp2
     if len(intersect) > 0:
-        # This is try to catch a single transition point
-        try:
-            rxn = ComputedReaction([entry_left, entry_right], list(intersect))
-            c1 = _entry_coeff(rxn, entry_left)
-            c2 = _entry_coeff(rxn, entry_right)
-            if c1 is None or c2 is None or c1 * c2 <= 0:
+        # This is try to catch a single transition point: where the path crosses the boundary made of the
+        # phases shared by both ends. It is only accepted if the mixture there really decomposes into
+        # shared phases, since the path can also leave through other phase regions.
+        x = _get_transition_ratio(entry_left, entry_right, intersect, x1, x2)
+        if x is not None:
+            (decomp_x, h_x) = pd.get_decomp_and_e_above_hull(get_mix_entry(entry1, entry2, x))
+            decomp_x = set(decomp_x.keys())
+            if decomp_x <= intersect:
+                evolution_profile[x] = (decomp_x, h_x)
                 return evolution_profile
-            x = (c1 * x1 + c2 * x2) / (c1 + c2)
-            entry_mid = VirtualEntry.from_mixing({entry_left: c1 / (c1 + c2), entry_right: c2 / (c1 + c2)})
-            h_mid = pd.get_decomp_and_e_above_hull(entry_mid)[1]
-            evolution_profile[x] = (intersect, h_mid)
-            return evolution_profile
-        except ReactionError:
-            pass
+
+    if x2 - x1 < MIN_RATIO_INTERVAL:
+        return evolution_profile
 
     x_mid = (x1 + x2) / 2.0
     entry_mid = get_mix_entry(entry1, entry2, x_mid)
@@ -317,6 +331,23 @@ def get_full_evolution_profile(pd, entry1, entry2, x1, x2):
     evolution_profile.update(part1)
     evolution_profile.update(part2)
     return evolution_profile
+
+
+def _get_transition_ratio(entry_left, entry_right, phases, x1, x2):
+    """
+    The mixing ratio strictly between x1 and x2 (the ratios of entry_left and entry_right) at which the
+    mixture can be made of the given phases alone, or None if there is no such ratio.
+    """
+    try:
+        rxn = ComputedReaction([entry_left, entry_right], list(phases))
+    except ReactionError:
+        return None
+    c1 = _entry_coeff(rxn, entry_left)
+    c2 = _entry_coeff(rxn, entry_right)
+    if c1 is None or c2 is None or c1 * c2 <= 0:
+        return None
+    x = (c1 * x1 + c2 * x2) / (c1 + c2)
+    return x if x1 < x < x2 else None
 
 
 def _entry_coeff(rxn, entry):
@@ -335,19 +366,45 @@ def _entry_coeff(rxn, entry):
 def clean_profile(evolution_profile):
     """
     This function is to clean the calculated profile from binary search. Redundant trial results are pruned out,
-    with only transition points left.
+    with only the two ends and the transition points left.
     """
-    raw_data = list(evolution_profile.items())
-    raw_data.sort()
+    raw_data = sorted(evolution_profile.items(), key=lambda item: item[0])
     clean_set = [raw_data[0]]
-    for i in range(1, len(raw_data)):
+    for i in range(1, len(raw_data) - 1):
         x, (decomp, h) = raw_data[i]
         x_cpr, (decomp_cpr, h_cpr) = clean_set[-1]
         if set(decomp_cpr) <= set(decomp):
             continue
         else:
             clean_set.append(raw_data[i])
+    # Always keep the far end, even when it is in the same phase region as the points before it
+    if len(raw_data) > 1:
+        clean_set.append(raw_data[-1])
     return clean_set
+
+
+def get_mutual_rxn_energies(profile, n1=1.0, n2=1.0):
+    """
+    The mutual reaction energy at each point of a cleaned mixing profile: the reaction energy of the
+    mixture minus that of entry1 and entry2 decomposing on their own, per atom of the mixture.
+
+    The energies in the profile are per atom of the mixture that the phase diagram counts. In a grand
+    potential phase diagram these are the atoms other than the open element, so the two ends have to be
+    weighted by the counted atoms they bring to the mixture, not just by the mixing ratio x.
+    :param profile: a profile from pd_mixing or gppd_mixing, which starts at x = 0 and ends at x = 1
+    :param n1, n2: the counted atoms per atom of entry1 and entry2. 1 for pd_mixing; for gppd_mixing,
+        the fraction of their atoms that are not the open element.
+    :return: a list of mutual reaction energies (eV/atom), one for each point of the profile
+    """
+    x_first, (_, h2) = profile[0]
+    x_last, (_, h1) = profile[-1]
+    if x_first != 0 or x_last != 1:
+        raise ValueError("The profile must start at x = 0 and end at x = 1")
+    mutual = []
+    for x, (_, h) in profile:
+        n = x * n1 + (1 - x) * n2
+        mutual.append(-h + (x * n1 * h1 + (1 - x) * n2 * h2) / n)
+    return mutual
 
 
 def get_mix_entry(entry1, entry2, x):
