@@ -125,10 +125,11 @@ def main():
     args = parser.parse_args()
 
     if hasattr(args, "func"):
-        mpdata.set_thermo_type(args.thermo_type)
+        # Bad input (e.g. an unknown element) raises ValueError, and Materials Project errors RuntimeError
         try:
+            mpdata.set_thermo_type(args.thermo_type)
             args.func(args)
-        except (RuntimeError, ImportError) as err:
+        except (RuntimeError, ImportError, ValueError) as err:
             raise SystemExit("Error: {}".format(err))
     else:
         parser.print_help()

@@ -23,8 +23,8 @@ __email__ = "yizhou.zhu@gmail.com"
 __status__ = "Production"
 __date__ = "Jun 10, 2018"
 
-plt.rcParams['mathtext.default'] = 'regular'
-plt.rcParams['font.size'] = 15
+# Font size of the plots. Set on each plot, so that importing this module leaves the matplotlib settings alone.
+FONT_SIZE = 15
 
 # Working ions and their charges, used to convert chemical potential to voltage
 COMMON_WORKING_IONS = {'Li': 1, 'Na': 1, 'K': 1, 'Mg': 2, 'Ca': 2, 'Zn': 2, 'Al': 3}
@@ -250,8 +250,9 @@ class VirtualEntry(ComputedEntry):
         """
         The chemical potential range (ref. to the pure element) where this phase is stable
         against gain or loss of element oe.
-        :return: (mu_high, mu_low). mu_low is None if there is no lower bound, and
-            (None, None) if the phase is not stable at any chemical potential.
+        :return: (mu_high, mu_low). mu_low is None if there is no lower bound, mu_high is None if there is
+            no upper bound (only possible with allowpmu), and (None, None) if the phase is not stable at
+            any chemical potential.
         """
         profile = self.get_phase_evolution_profile(oe=oe, allowpmu=allowpmu, entries=entries)
         chempots = [_['chempot'] for _ in profile]
@@ -260,10 +261,10 @@ class VirtualEntry(ComputedEntry):
 
         if abs(evolutions[index]) < 1e-8:
             ref = profile[0]['element_reference'].energy_per_atom
-            if index < len(profile) - 1:
-                return (chempots[index] - ref, chempots[index + 1] - ref)
-            else:
-                return (chempots[index] - ref, None)
+            # With allowpmu, the first stage has no upper bound (its chempot was only moved back to the element)
+            mu_high = None if allowpmu and index == 0 else chempots[index] - ref
+            mu_low = chempots[index + 1] - ref if index < len(profile) - 1 else None
+            return (mu_high, mu_low)
         else:
             return (None, None)
 
@@ -318,8 +319,9 @@ class VirtualEntry(ComputedEntry):
             ax.plot(rxn_trans_list, rxn_e_list, '-', linewidth=1.5, color='cornflowerblue', zorder=3)
             ax.scatter(rxn_trans_list[1:-1], rxn_e_list[1:-1], edgecolors='cornflowerblue', facecolors='w',
                        linewidth=1.5, s=50, zorder=4)
-            ax.set_xlabel('Chemical potential ref. to {}'.format(open_el))
-            ax.set_ylabel('Reaction energy (eV/atom)')
+            ax.tick_params(labelsize=FONT_SIZE)
+            ax.set_xlabel('Chemical potential ref. to {}'.format(open_el), fontsize=FONT_SIZE)
+            ax.set_ylabel('Reaction energy (eV/atom)', fontsize=FONT_SIZE)
             ax.set_xlim([float(rxn_trans_list[0]), float(rxn_trans_list[-1])])
             if save_path:
                 plt.savefig(save_path, bbox_inches='tight')
@@ -400,13 +402,15 @@ class VirtualEntry(ComputedEntry):
             Y += [v_list[i], v_list[i]]
         fig, ax = plt.subplots(1, 1)
         plt.plot(X, Y)
+        ax.tick_params(labelsize=FONT_SIZE)
         ylabel = 'Potential ref. to {} / '.format(open_el)
-        sup = r'${}^{{{}+}}$'.format(open_el, valence) if valence > 1 else r'${}^{{+}}$'.format(open_el)
-        ax.set_ylabel(ylabel + sup)
+        charge = '{}+'.format(valence) if valence > 1 else '+'
+        sup = r'$\mathregular{{{}^{{{}}}}}$'.format(open_el, charge)
+        ax.set_ylabel(ylabel + sup, fontsize=FONT_SIZE)
         s1 = re.sub("([0-9.]+)", "_{\\1}", self.name)
         formula = r'$\mathregular{' + s1 + '}$'
-        ax.set_xlabel(r'$\Delta$n({}) per {}'.format(open_el, formula))
-        ax.legend([formula])
+        ax.set_xlabel(r'$\mathregular{{\Delta}}$n({}) per {}'.format(open_el, formula), fontsize=FONT_SIZE)
+        ax.legend([formula], fontsize=FONT_SIZE)
         if min(ax.get_ylim()) < 0:
             ax.axhline(0, linestyle='--', color='k', linewidth=0.5, zorder=1)
         else:

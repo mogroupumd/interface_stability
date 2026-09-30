@@ -217,30 +217,21 @@ x(Li3PS4)  x(LiCoO2)  Rxn. E. (meV/atom)  Mutual Rxn. E. (meV/atom)        Phase
   0.00       1.00             0.00                   0.00                                  LiCoO2
 ```
 
-**pseudo_binary gppd composition_1 composition_2**
+**pseudo_binary gppd composition_1 composition_2 open_element chemical_potential**
 
-This is used to calculate the chemical stability of two phases. 
+This is used to calculate the electrochemical stability of two phases, in a system open to an element
+held at the given chemical potential (in eV, referenced to the pure element).
+The mixing ratios count all atoms of each phase, as in `pd`; the energies are per atom of the elements
+other than the open element.
 
-The minimum point is marked in the comment column
+The minima of the reaction energy and of the mutual reaction energy are marked in the comment column.
+
+Note: the example below was made with an older version, which weighted the two phases wrongly in the mutual
+reaction energy when they contain different fractions of the open element. The current version gives different
+values in that column (and may mark a different minimum).
 
 ```bash
-$ pseudo_binary pd LiCoO2 Li3PS4
----------------------------------------------------------------------------------------------------- 
-The starting phases compositions are  LiCoO2 and Li3PS4
-All mixing ratio based on all formula already normalized to ONE atom per fu!
-
- ===  Pseudo-binary evolution profile  === 
-x(Li3PS4)  x(LiCoO2)  Rxn. E. (meV/atom)  Mutual Rxn. E. (meV/atom)        Phase Equilibria       Comment 
-  1.00       0.00            -0.00                   0.00                                  Li3PS4         
-  0.50       0.50          -402.55                -402.55               CoS2, Co3S4, Li2S, Li3PO4         
-  0.48       0.52          -405.94                -405.94             Co3S4, Li2S, Li2SO4, Li3PO4         
-  0.41       0.59          -406.03                -406.03             Li2S, Li3PO4, Li2SO4, Co9S8  Minimum
-  0.34       0.66          -368.44                -368.44             Li3PO4, Li2O, Li2SO4, Co9S8         
-  0.16       0.84          -237.56                -237.56                Co, Li2O, Li2SO4, Li3PO4         
-  0.15       0.85          -233.60                -233.60             Co, Li2SO4, Li6CoO4, Li3PO4         
-  0.06       0.94           -90.55                 -90.55            CoO, Li3PO4, Li2SO4, Li6CoO4         
-  0.00       1.00             0.00                   0.00                                  LiCoO2
-(py3k) Yizhous-MBP:interface_stability yizhou$ pseudo_binary gppd LiCoO2 Li3PS4 Li -5
+$ pseudo_binary gppd LiCoO2 Li3PS4 Li -5
 ---------------------------------------------------------------------------------------------------- 
 The starting phases compositions are  LiCoO2 and Li3PS4
 All mixing ratio based on all formula already normalized to ONE atom per fu!
@@ -261,6 +252,15 @@ x(Li3PS4)  x(LiCoO2)  Rxn. E. (meV/atom)  Mutual Rxn. E. (meV/atom)     Phase Eq
   0.10       0.90         -1,104.35               -569.65            Co3(PO4)2, CoSO4, Co3O4                     
   0.09       0.91         -1,075.28               -545.43                CoSO4, Co3O4, CoPO4                     
   0.00       1.00           -428.07                  0.00                               CoO2
+```
+
+**pseudo_binary gppd_screen composition_1 composition_2 open_element miu_low miu_high**
+
+This scans a chemical potential range (in eV, referenced to the pure element) and reports the
+electrochemical stability of the two phases over it.
+
+```bash
+$ pseudo_binary gppd_screen Li2S P2S5 Li -4 0
 ```
 
 ## License
